@@ -2,7 +2,12 @@ use clap::{Parser, Subcommand};
 use clap_verbosity_flag::Verbosity;
 use std::path::PathBuf;
 
+#[allow(non_snake_case)]
+mod ir;
+mod orchestrator;
 mod reader;
+#[allow(non_snake_case)]
+mod ExtractionFactory;
 
 #[derive(Parser, Debug)]
 #[command(name = "reko", version, about = "Cross-platform CLI for Windows/Linux/macOS", long_about = None)]
@@ -40,6 +45,19 @@ enum Commands {
     Cat {
         /// Path to file
         path: PathBuf,
+    },
+    /// Extract functions from file via reader -> javaExtractor -> IR JSON
+    Extract {
+        /// Path to source file (currently .java only)
+        path: PathBuf,
+
+        /// Output file (default stdout)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+
+        /// Compact JSON (default pretty)
+        #[arg(long)]
+        compact: bool,
     },
 }
 
@@ -84,6 +102,25 @@ fn main() -> anyhow::Result<()> {
         Some(Commands::Cat { path }) => {
             let content = reader::read_exact(&path)?;
             print!("{}", reader::format_with_line_numbers(&content));
+        }
+        Some(Commands::Extract {
+            path,
+            output,
+            compact,
+        }) => {
+            // Upper layer orchestrator: reader -> javaExtractor
+            let fns = orchestrator::Orchestrator::extract_file(&path)?;
+            let json = if compact {
+                serde_json::to_string(&fns)?
+            } else {
+                serde_json::to_string_pretty(&fns)?
+            };
+            if let Some(out_path) = output {
+                std::fs::write(&out_path, &json)?;
+                println!("Wrote {} functions to {}", fns.len(), out_path.display());
+            } else {
+                println!("{json}");
+            }
         }
         None => {
             println!("Hello, world! Try `reko hello --help` or `reko --help`");

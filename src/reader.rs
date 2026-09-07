@@ -15,6 +15,7 @@ pub fn read_bytes_exact(path: &Path) -> Result<Vec<u8>> {
     std::fs::read(path).with_context(|| format!("failed to read file: {}", path.display()))
 }
 
+#[allow(dead_code)]
 /// Return lines with numbers, fully preserving original content.
 ///
 /// Each entry is `(line_number, line_content_with_terminator)` where
