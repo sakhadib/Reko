@@ -40,7 +40,8 @@ impl Orchestrator {
             "rs" => crate::ExtractionFactory::rustExtractor::extract(content, file_path),
             "swift" => crate::ExtractionFactory::swiftExtractor::extract(content, file_path),
             "rb" => crate::ExtractionFactory::rubyExtractor::extract(content, file_path),
-            other => anyhow::bail!("unsupported file type: .{other} (supported: .java .py .c .h .cpp .cc .cxx .hpp .php .js .mjs .cjs .cs .ts .mts .cts .go .rs .swift .rb)"),
+            "kt" | "kts" => crate::ExtractionFactory::kotlinExtractor::extract(content, file_path),
+            other => anyhow::bail!("unsupported file type: .{other} (supported: .java .py .c .h .cpp .cc .cxx .hpp .php .js .mjs .cjs .cs .ts .mts .cts .go .rs .swift .rb .kt .kts)"),
         }
     }
 

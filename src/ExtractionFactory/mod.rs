@@ -5,6 +5,7 @@ pub mod csharpExtractor;
 pub mod goExtractor;
 pub mod javaExtractor;
 pub mod jsExtractor;
+pub mod kotlinExtractor;
 pub mod phpExtractor;
 pub mod pythonExtractor;
 pub mod rubyExtractor;
