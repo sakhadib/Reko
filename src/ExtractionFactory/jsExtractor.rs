@@ -1104,12 +1104,20 @@ fn try_parse_arrow(
         return None;
     }
 
-    // Determine async
-    let before_arrow = &line[..arrow_rel];
+    // Determine async (safe)
+    let before_arrow = if arrow_rel <= line.len() {
+        &line[..arrow_rel]
+    } else {
+        line
+    };
     let is_async = before_arrow.contains("async");
 
     // Extract params substring between '=' and '=>'
-    let between = &line[eq_pos + 1..arrow_rel];
+    let between = if eq_pos + 1 <= arrow_rel && arrow_rel <= line.len() {
+        &line[eq_pos + 1..arrow_rel]
+    } else {
+        return None;
+    };
     let between_trim = between.trim().trim_start_matches("async").trim();
 
     let params_str: String;

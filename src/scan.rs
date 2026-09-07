@@ -333,42 +333,57 @@ fn extract_files_parallel_with_progress(
     let records: Vec<Option<FileRecord>> = files
         .par_iter()
         .map(|path| {
-            let rel = path
-                .strip_prefix(root)
-                .unwrap_or(path)
-                .to_string_lossy()
-                .replace('\\', "/");
-            // Update progress message (truncate long paths)
-            let display = if rel.len() > 48 {
-                format!("…{}", &rel[rel.len() - 47..])
-            } else {
-                rel.clone()
-            };
-            pb.set_message(display);
+            // Catch panics from extractors so one bad file doesn't crash all workers
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let rel = path
+                    .strip_prefix(root)
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                // Update progress message (truncate long paths)
+                let display = if rel.len() > 48 {
+                    format!("…{}", &rel[rel.len() - 47..])
+                } else {
+                    rel.clone()
+                };
+                pb.set_message(display);
 
-            let ext = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("")
-                .to_lowercase();
-            let language = language_for(&ext);
-            let result = match Orchestrator::extract_file(path) {
-                Ok(fns) => {
-                    if fns.is_empty() {
+                let ext = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_lowercase();
+                let language = language_for(&ext);
+                match Orchestrator::extract_file(path) {
+                    Ok(fns) => {
+                        if fns.is_empty() {
+                            None
+                        } else {
+                            Some(FileRecord {
+                                file: rel,
+                                absolute: Some(path.display().to_string()),
+                                language,
+                                count: fns.len(),
+                                functions: fns,
+                            })
+                        }
+                    }
+                    Err(e) => {
+                        pb.println(format!("warn: {}: {}", path.display(), e));
+                        if let Ok(mut m) = errors.lock() {
+                            *m += 1
+                        }
                         None
-                    } else {
-                        Some(FileRecord {
-                            file: rel,
-                            absolute: Some(path.display().to_string()),
-                            language,
-                            count: fns.len(),
-                            functions: fns,
-                        })
                     }
                 }
-                Err(e) => {
-                    // Use pb.println to avoid breaking bar
-                    pb.println(format!("warn: {}: {}", path.display(), e));
+            }));
+            let result = match res {
+                Ok(v) => v,
+                Err(_) => {
+                    pb.println(format!(
+                        "warn: panic while extracting {} (skipped)",
+                        path.display()
+                    ));
                     if let Ok(mut m) = errors.lock() {
                         *m += 1
                     }

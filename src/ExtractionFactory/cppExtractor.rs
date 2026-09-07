@@ -408,16 +408,31 @@ fn parse_cpp_signature(sig: &str, class_hint: Option<&str>) -> (String, Vec<Stri
     }
     // Extract trailing qualifiers after ')': const, noexcept, override, final, &, &&
     let paren_start = core.find('(').unwrap_or(core.len());
-    let before_paren = core[..paren_start].trim().to_string();
+    let before_paren = if paren_start <= core.len() {
+        core[..paren_start].trim().to_string()
+    } else {
+        String::new()
+    };
     let inside_paren = if paren_start < core.len() {
-        let paren_end = core.rfind(')').unwrap_or(core.len() - 1);
-        core[paren_start + 1..paren_end].trim().to_string()
+        if let Some(paren_end) = core.rfind(')') {
+            if paren_end > paren_start && paren_end <= core.len() {
+                core[paren_start + 1..paren_end].trim().to_string()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        }
     } else {
         String::new()
     };
     let after_paren_raw = if paren_start < core.len() {
         if let Some(end) = core.rfind(')') {
-            core[end + 1..].trim().to_string()
+            if end + 1 <= core.len() {
+                core[end + 1..].trim().to_string()
+            } else {
+                String::new()
+            }
         } else {
             String::new()
         }

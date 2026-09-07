@@ -453,12 +453,23 @@ fn parse_c_signature(sig: &str) -> (String, Vec<String>, String, String, Vec<Par
     // Remove possible trailing attribute like "__attribute__((...))" after )
     // We already truncated at paren end, so not needed
 
-    // Extract inside parens
+    // Extract inside parens (safe slicing)
     let paren_start = s.find('(').unwrap_or(s.len());
-    let before_paren = s[..paren_start].trim().to_string();
+    let before_paren = if paren_start <= s.len() {
+        s[..paren_start].trim().to_string()
+    } else {
+        String::new()
+    };
     let inside_paren = if paren_start < s.len() {
-        let paren_end = s.rfind(')').unwrap_or(s.len() - 1);
-        s[paren_start + 1..paren_end].trim().to_string()
+        if let Some(paren_end) = s.rfind(')') {
+            if paren_end > paren_start && paren_end <= s.len() {
+                s[paren_start + 1..paren_end].trim().to_string()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        }
     } else {
         String::new()
     };
