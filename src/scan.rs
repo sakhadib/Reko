@@ -264,12 +264,53 @@ pub fn extract_files_parallel(
 }
 
 /// High-level: walk + parallel extract, respecting ignores.
+/// Show modern progress: spinner while exploring, bar while extracting (updated by workers).
 pub fn scan_directory(root: &Path) -> Result<(Vec<FileRecord>, ScanStats)> {
+    use indicatif::{ProgressBar, ProgressStyle};
+    use std::time::Duration;
+
     let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let ignored_dirs: HashSet<String> = DEFAULT_IGNORED_DIRS.iter().map(|s| s.to_string()).collect();
 
+    // Phase 1: exploring repository (spinner)
+    let explore_pb = ProgressBar::new_spinner();
+    explore_pb.set_style(
+        ProgressStyle::with_template("{spinner:.cyan} {msg} [{elapsed_precise}]")
+            .unwrap()
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+    );
+    explore_pb.set_message(format!("Exploring {}", root.display()));
+    explore_pb.enable_steady_tick(Duration::from_millis(80));
+
     let (files, mut walk_stats) = collect_files(&root, &ignored_dirs);
-    let (records, extract_stats) = extract_files_parallel(&root, files);
+
+    explore_pb.finish_with_message(format!(
+        "Found {} source files ({} unsupported skipped, {} ignored dirs)",
+        walk_stats.supported_files, walk_stats.unsupported_files, walk_stats.ignored_package_dirs
+    ));
+
+    // Phase 2: extracting (progress bar, updated by rayon workers)
+    let (records, extract_stats) = if files.is_empty() {
+        (Vec::new(), ScanStats::default())
+    } else {
+        let pb = ProgressBar::new(files.len() as u64);
+        pb.set_style(
+            ProgressStyle::with_template(
+                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%) {eta_precise} {msg}",
+            )
+            .unwrap()
+            .progress_chars("█▉▊▋▌▍▎▏  "),
+        );
+        pb.set_message("Extracting...");
+        // Share progress bar via Arc clone (ProgressBar is internally Arc, Clone is cheap)
+        let pb_clone = pb.clone();
+        let (recs, stats) = extract_files_parallel_with_progress(&root, files, pb_clone);
+        pb.finish_with_message(format!(
+            "Extracted {} files → {} functions",
+            stats.files_with_functions, stats.total_functions
+        ));
+        (recs, stats)
+    };
 
     // Merge stats
     walk_stats.files_with_functions = extract_stats.files_with_functions;
@@ -278,6 +319,80 @@ pub fn scan_directory(root: &Path) -> Result<(Vec<FileRecord>, ScanStats)> {
     // walk_stats already has unsupported and ignored counts
 
     Ok((records, walk_stats))
+}
+
+/// Variant used by spinner-bar flow to allow progress updates.
+fn extract_files_parallel_with_progress(
+    root: &Path,
+    files: Vec<PathBuf>,
+    pb: indicatif::ProgressBar,
+) -> (Vec<FileRecord>, ScanStats) {
+    let mut stats = ScanStats::default();
+    let errors = Arc::new(Mutex::new(0usize));
+
+    let records: Vec<Option<FileRecord>> = files
+        .par_iter()
+        .map(|path| {
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            // Update progress message (truncate long paths)
+            let display = if rel.len() > 48 {
+                format!("…{}", &rel[rel.len() - 47..])
+            } else {
+                rel.clone()
+            };
+            pb.set_message(display);
+
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            let language = language_for(&ext);
+            let result = match Orchestrator::extract_file(path) {
+                Ok(fns) => {
+                    if fns.is_empty() {
+                        None
+                    } else {
+                        Some(FileRecord {
+                            file: rel,
+                            absolute: Some(path.display().to_string()),
+                            language,
+                            count: fns.len(),
+                            functions: fns,
+                        })
+                    }
+                }
+                Err(e) => {
+                    // Use pb.println to avoid breaking bar
+                    pb.println(format!("warn: {}: {}", path.display(), e));
+                    if let Ok(mut m) = errors.lock() {
+                        *m += 1
+                    }
+                    None
+                }
+            };
+            pb.inc(1);
+            result
+        })
+        .collect();
+
+    let mut out: Vec<FileRecord> = records.into_iter().flatten().collect();
+    out.sort_by(|a, b| a.file.cmp(&b.file));
+
+    let total_functions: usize = out.iter().map(|r| r.count).sum();
+    let files_with_functions = out.len();
+    let err_cnt = errors.lock().map(|v| *v).unwrap_or(0);
+
+    stats.supported_files = files.len();
+    stats.files_with_functions = files_with_functions;
+    stats.total_functions = total_functions;
+    stats.errors = err_cnt;
+
+    (out, stats)
 }
 
 /// Resolve output path:

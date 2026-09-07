@@ -125,8 +125,8 @@ fn main() -> anyhow::Result<()> {
 
             if target.is_dir() {
                 // Directory mode: parallel walk + JSONL export hierarchically
+                // Progress: explore spinner + extracting bar handled inside scan_directory (modern, worker-updated)
                 let root = target.canonicalize().unwrap_or(target.clone());
-                eprintln!("Scanning {} ...", root.display());
 
                 let (records, stats) = scan::scan_directory(&root)?;
 
