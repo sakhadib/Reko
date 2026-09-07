@@ -1,11 +1,12 @@
 use clap::{Parser, Subcommand};
 use clap_verbosity_flag::Verbosity;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[allow(non_snake_case)]
 mod ir;
 mod orchestrator;
 mod reader;
+mod scan;
 #[allow(non_snake_case)]
 mod ExtractionFactory;
 
@@ -46,16 +47,22 @@ enum Commands {
         /// Path to file
         path: PathBuf,
     },
-    /// Extract functions from file via reader -> javaExtractor -> IR JSON
+    /// Extract functions from file/dir via reader -> extractors -> IR JSON
+    /// When path is a directory: walks recursively (respects .gitignore, skips package dirs), parallel extraction, writes single JSONL hierarchically (folders->files->methods).
     Extract {
-        /// Path to source file (currently .java only)
+        /// Path to source file or directory (default "."). Also supports --path alias.
+        #[arg(default_value = ".", value_name = "PATH")]
         path: PathBuf,
 
-        /// Output file (default stdout)
+        /// Alias for `path` so you can do `reko extract --path <dir>` from anywhere
+        #[arg(long = "path", hide = true)]
+        path_alias: Option<PathBuf>,
+
+        /// Output file or folder (default: <root>/reko.jsonl for dirs, stdout for single file). If folder, writes reko.jsonl inside it.
         #[arg(short, long)]
         output: Option<PathBuf>,
 
-        /// Compact JSON (default pretty)
+        /// Compact JSON (single line per function/file; default pretty for single-file, JSONL for dirs)
         #[arg(long)]
         compact: bool,
     },
@@ -105,21 +112,89 @@ fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Extract {
             path,
+            path_alias,
             output,
             compact,
         }) => {
-            // Upper layer orchestrator: reader -> javaExtractor
-            let fns = orchestrator::Orchestrator::extract_file(&path)?;
-            let json = if compact {
-                serde_json::to_string(&fns)?
+            let target = path_alias.as_ref().unwrap_or(&path).clone();
+            let target = if target.as_os_str().is_empty() {
+                PathBuf::from(".")
             } else {
-                serde_json::to_string_pretty(&fns)?
+                target
             };
-            if let Some(out_path) = output {
-                std::fs::write(&out_path, &json)?;
-                println!("Wrote {} functions to {}", fns.len(), out_path.display());
+
+            if target.is_dir() {
+                // Directory mode: parallel walk + JSONL export hierarchically
+                let root = target.canonicalize().unwrap_or(target.clone());
+                eprintln!("Scanning {} ...", root.display());
+
+                let (records, stats) = scan::scan_directory(&root)?;
+
+                // Resolve output
+                let out_path = scan::resolve_output_path(&root, output.as_deref());
+
+                // Write JSONL (one line per file: {file,language,count,functions})
+                scan::write_jsonl(&out_path, &records)?;
+
+                // Reports
+                eprintln!(
+                    "Done: {} file(s) with functions, {} total functions, {} unsupported file(s) skipped, {} ignored package entries, {} errors.",
+                    stats.files_with_functions,
+                    stats.total_functions,
+                    stats.unsupported_files,
+                    stats.ignored_package_dirs,
+                    stats.errors
+                );
+                if !stats.unsupported_ext_counts.is_empty() {
+                    let mut v: Vec<_> = stats.unsupported_ext_counts.iter().collect();
+                    v.sort_by_key(|(k, _)| *k);
+                    let detail: Vec<String> = v
+                        .into_iter()
+                        .map(|(ext, cnt)| {
+                            let label = if ext.is_empty() { "(no ext)" } else { ext };
+                            format!("{}:{} ", label, cnt)
+                        })
+                        .collect();
+                    eprintln!("Unsupported breakdown: {}", detail.join(""));
+                }
+                eprintln!("Wrote JSONL ({} lines) to {}", records.len(), out_path.display());
+                // Also print path to stdout for scripting?
+                if output.is_none() {
+                    // hint
+                    eprintln!("Hint: use --output <file> to customize location");
+                }
+            } else if target.is_file() {
+                // Single-file mode (legacy)
+                let fns = orchestrator::Orchestrator::extract_file(&target)?;
+                let json = if compact {
+                    serde_json::to_string(&fns)?
+                } else {
+                    serde_json::to_string_pretty(&fns)?
+                };
+                if let Some(out_path) = output {
+                    // If output path is a directory, write inside it; otherwise treat as file
+                    let out_path_ref: &Path = out_path.as_path();
+                    let final_path = if out_path_ref.exists() && out_path_ref.is_dir() {
+                        out_path_ref.join("reko.json")
+                    } else if out_path_ref.extension().is_none() && !out_path_ref.to_string_lossy().contains('.') {
+                        // Heuristic: no extension => folder intent, but fallback to file write directly if not dir
+                        // Keep as is if user passed explicit file without ext? We'll treat as file.
+                        out_path.clone()
+                    } else {
+                        out_path.clone()
+                    };
+                    if let Some(parent) = final_path.parent() {
+                        if !parent.as_os_str().is_empty() {
+                            std::fs::create_dir_all(parent)?;
+                        }
+                    }
+                    std::fs::write(&final_path, &json)?;
+                    println!("Wrote {} functions to {}", fns.len(), final_path.display());
+                } else {
+                    println!("{json}");
+                }
             } else {
-                println!("{json}");
+                anyhow::bail!("path does not exist: {}", target.display());
             }
         }
         None => {
