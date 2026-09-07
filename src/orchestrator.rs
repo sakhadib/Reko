@@ -34,14 +34,16 @@ impl Orchestrator {
             }
             "php" => crate::ExtractionFactory::phpExtractor::extract(content, file_path),
             "js" | "mjs" | "cjs" => crate::ExtractionFactory::jsExtractor::extract(content, file_path),
+            "jsx" => crate::ExtractionFactory::jsxExtractor::extract(content, file_path),
             "cs" => crate::ExtractionFactory::csharpExtractor::extract(content, file_path),
             "ts" | "mts" | "cts" => crate::ExtractionFactory::tsExtractor::extract(content, file_path),
+            "tsx" => crate::ExtractionFactory::tsxExtractor::extract(content, file_path),
             "go" => crate::ExtractionFactory::goExtractor::extract(content, file_path),
             "rs" => crate::ExtractionFactory::rustExtractor::extract(content, file_path),
             "swift" => crate::ExtractionFactory::swiftExtractor::extract(content, file_path),
             "rb" => crate::ExtractionFactory::rubyExtractor::extract(content, file_path),
             "kt" | "kts" => crate::ExtractionFactory::kotlinExtractor::extract(content, file_path),
-            other => anyhow::bail!("unsupported file type: .{other} (supported: .java .py .c .h .cpp .cc .cxx .hpp .php .js .mjs .cjs .cs .ts .mts .cts .go .rs .swift .rb .kt .kts)"),
+            other => anyhow::bail!("unsupported file type: .{other} (supported: .java .py .c .h .cpp .cc .cxx .hpp .php .js .mjs .cjs .jsx .cs .ts .mts .cts .tsx .go .rs .swift .rb .kt .kts)"),
         }
     }
 
