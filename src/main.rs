@@ -1,5 +1,8 @@
 use clap::{Parser, Subcommand};
 use clap_verbosity_flag::Verbosity;
+use std::path::PathBuf;
+
+mod reader;
 
 #[derive(Parser, Debug)]
 #[command(name = "reko", version, about = "Cross-platform CLI for Windows/Linux/macOS", long_about = None)]
@@ -19,6 +22,25 @@ enum Commands {
         #[arg(default_value = "world")]
         name: String,
     },
+    /// Read a file and print exact content with line numbers (tabs/spaces/linebreaks preserved)
+    Read {
+        /// Path to file
+        path: PathBuf,
+
+        /// Show raw bytes mode (hex dump) for non-UTF8 files
+        #[arg(long)]
+        raw: bool,
+
+        /// Always end output with newline (default preserves exact semantics)
+        #[arg(long)]
+        ensure_newline: bool,
+    },
+    /// Alias for `read`
+    #[command(name = "cat")]
+    Cat {
+        /// Path to file
+        path: PathBuf,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -30,6 +52,38 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Some(Commands::Hello { name }) => {
             println!("Hello, {name}!");
+        }
+        Some(Commands::Read {
+            path,
+            raw,
+            ensure_newline,
+        }) => {
+            if raw {
+                let bytes = reader::read_bytes_exact(&path)?;
+                // hex + ascii like `xxd` but exact bytes preserved
+                for (i, chunk) in bytes.chunks(16).enumerate() {
+                    print!("{i:08x}: ");
+                    for b in chunk {
+                        print!("{b:02x} ");
+                    }
+                    println!();
+                }
+            } else {
+                let content = reader::read_exact(&path)?;
+                let out = if ensure_newline {
+                    reader::format_with_line_numbers_always_newline(&content)
+                } else {
+                    reader::format_with_line_numbers(&content)
+                };
+                print!("{out}");
+                // Ensure flush for exact semantics - no extra newline unless content had it
+                use std::io::Write;
+                std::io::stdout().flush().ok();
+            }
+        }
+        Some(Commands::Cat { path }) => {
+            let content = reader::read_exact(&path)?;
+            print!("{}", reader::format_with_line_numbers(&content));
         }
         None => {
             println!("Hello, world! Try `reko hello --help` or `reko --help`");
