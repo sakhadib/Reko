@@ -27,8 +27,13 @@ impl Orchestrator {
 
         match ext.as_str() {
             "java" => crate::ExtractionFactory::javaExtractor::extract(content, file_path),
-            // Future: add more extractors here, e.g. "rs", "py", etc.
-            other => anyhow::bail!("unsupported file type: .{other} (only .java supported currently)"),
+            "py" | "python" => crate::ExtractionFactory::pythonExtractor::extract(content, file_path),
+            "c" | "h" => crate::ExtractionFactory::cExtractor::extract(content, file_path),
+            "cpp" | "cc" | "cxx" | "hpp" | "hh" => {
+                crate::ExtractionFactory::cppExtractor::extract(content, file_path)
+            }
+            "php" => crate::ExtractionFactory::phpExtractor::extract(content, file_path),
+            other => anyhow::bail!("unsupported file type: .{other} (supported: .java .py .c .h .cpp .cc .cxx .hpp .php)"),
         }
     }
 
