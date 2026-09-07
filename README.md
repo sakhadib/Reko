@@ -1,44 +1,143 @@
 # reko
 
-Cross-platform CLI (Windows / Linux / macOS) built with Rust + `clap`.
+**Polyglot code extractor — one CLI, 15 languages, exact IR.**
 
-## Quick start
+`reko` walks any repository, respects `.gitignore`, skips package/build dirs, reads files byte-exact (tabs, `CRLF`, spaces preserved), and emits a single **hierarchical JSONL** `folders → files → methods` via a `reader → ExtractionFactory` pipeline. Install once, run anywhere: `reko extract .`.
 
+> **What it does:** For every supported file under a directory, it extracts **every function/method** into the IR defined in `supportive/IR_function.json` (`identity / source {hash,location} / declaration / signature / context / body / ...` – 215-field spec) and writes one JSON line per file.
+
+---
+
+## Features
+
+- **15 languages:** `Java`, `Python`, `C`, `C++`, `PHP`, `JavaScript`, `JSX` (React), `C#`, `TypeScript`, `TSX` (React), `Go`, `Rust`, `Swift`, `Ruby`, `Kotlin` (13 classic + 2 frontend).
+- **Exact reader:** `src/reader.rs` preserves `\t`, spaces, `\n` vs `\r\n` vs `\r`, trailing-no-newline.
+- **ExtractionFactory:** one extractor per language under `src/ExtractionFactory/*.rs` (brace/indent/`def→end` aware, string/comment aware, `sha256` + `line/col/byte` location, qualified names like `pkg::Class::func`).
+- **Orchestrator:** `src/orchestrator.rs` + `src/scan.rs` → `reader → extractor` per file.
+- **Repository walk:** `ignore` crate respects `.gitignore` + `.git/info/exclude` + global, hard-coded package ignores (`node_modules,target,dist,build,vendor,__pycache__,.venv,.next,coverage,...`), skips symlinks, parallel `rayon` (all cores).
+- **Output:** single `reko.jsonl` in repo root (or `--output` file/folder) — each line `{file, language, count, functions: [IR...]}` sorted hierarchically, plus stats + unsupported breakdown.
+- **Cross-platform:** Windows / Linux / macOS, `clap` derive, `cargo build --release` LTO+stripped.
+
+---
+
+## Install
+
+### From source (recommended)
 ```bash
-cargo run -- --help
-cargo run -- hello --help
-cargo run -- hello Alice
+git clone https://github.com/sakhadib/Reko.git && cd Reko
+cargo build --release          # binary → target/release/reko
+cargo install --path .         # installs `reko` to ~/.cargo/bin
+reko --help
 ```
+
+### From crates.io (after publish)
+```bash
+cargo install reko
+```
+
+### From GitHub Releases (binaries)
+Releases publish `reko-linux-x86_64`, `reko-windows-x86_64.exe`, `reko-macos-{x86_64,aarch64}` on tag `v*`. Download from **Releases** and add to `PATH`.
+
+### Cross-compilation
+```bash
+rustup target add x86_64-unknown-linux-gnu x86_64-pc-windows-msvc aarch64-apple-darwin
+cargo build --release --target x86_64-unknown-linux-gnu
+```
+
+---
+
+## Usage
+
+### Extract a repository (hierarchical JSONL)
+```bash
+# In any repo, from its root:
+reko extract .                          # → ./reko.jsonl (15 files, 61 funcs etc)
+
+# From anywhere, pointing at a repo:
+reko extract --path /path/to/repo       # → /path/to/repo/reko.jsonl
+
+# Custom output:
+reko extract . --output /tmp/out        # → /tmp/out/reko.jsonl (folder)
+reko extract . --output /tmp/result.jsonl  # → file
+reko extract ManualTest --output reko.jsonl
+```
+
+**What you get (`reko.jsonl`):** JSON Lines, one line per file with functions:
+```json
+{"file":"src/foo.py","language":"python","count":2,"absolute":"/abs/src/foo.py","functions":[{"ir_version":"1.0","identity":{"id":"foo::MyClass::bar","name":"bar","qualified_name":"foo::MyClass::bar","kind":"function","language":"python",...},"source":{"file":"src/foo.py","module":"foo","source_text":"def bar...","hash":"sha256:...","location":{"start":{"line":3,"column":5,"byte":42},"end":{"line":5,"column":12,"byte":110}}},...}]}
+```
+Folders are implicit via `file` path (sorted `a/file.py` before `b/file.py`). Unsupported files are **skipped and reported** (`unsupported file(s) skipped, breakdown: json:2 md:3`).
+
+### Extract a single file
+```bash
+reko extract path/to/File.java               # → pretty JSON to stdout
+reko extract path/to/File.java --output out.json
+reko extract path/to/File.java --compact     # compact JSON
+```
+
+### Other commands
+```bash
+reko read path/to/file --help   # exact content with line numbers (tabs/CRLF preserved)
+reko cat path/to/file           # alias for read
+reko --help
+reko --version
+```
+
+### Ignore behavior
+- Respects every `.gitignore` (per-dir, parents, global, `.git/info/exclude`).
+- Always skips package dirs even if not gitignored: `.git,.hg,.svn,node_modules,target,dist,build,vendor,__pycache__,.venv,venv,.idea,.vscode,.next,out,coverage,.pytest_cache,.mypy_cache,.gradle,.parcel-cache,.turbo` etc.
+- Skips symlinks.
+- Reports `ignored package entries`, `unsupported` (e.g. `md:10 json:2`), `errors`, `total functions`.
+
+---
+
+## Supported languages & extensions
+
+| Language | Extensions | Example |
+|----------|------------|---------|
+| Java | `.java` | `public int foo(int a)` |
+| Python | `.py` | `def foo(a: int) -> str` |
+| C | `.c .h` | `int foo(int a)` |
+| C++ | `.cpp .cc .cxx .hpp .hh` | `template <T> T foo(T)` |
+| PHP | `.php` | `public function foo(): int` |
+| JavaScript | `.js .mjs .cjs` | `function foo(a,b)` |
+| JSX | `.jsx` | `function Comp(){return <div>}` (only JSX bodies, non-JSX ignored) |
+| C# | `.cs` | `public int Foo<T>(int a)` |
+| TypeScript | `.ts .mts .cts` | `function foo<T>(a: T): T` |
+| TSX | `.tsx` | `const C: React.FC<Props> = ()=><div>` |
+| Go | `.go` | `func (r Recv) Foo[T any](x T)` |
+| Rust | `.rs` | `pub async fn foo<T>(x: T)` |
+| Swift | `.swift` | `func foo<T>(x: T) async throws` |
+| Ruby | `.rb` | `def foo(a,b=1,*args)` |
+| Kotlin | `.kt .kts` | `suspend fun String.foo()` |
+
+Add a new one: add `src/ExtractionFactory/myExtractor.rs` with `pub fn extract(content: &str, path: &Path) -> Result<Vec<IrFunction>>`, register in `src/ExtractionFactory/mod.rs`, dispatch in `src/orchestrator.rs`.
+
+---
 
 ## Development
 
 ```bash
+cargo test          # 83 tests (reader + 13 extractors + scan)
 cargo build
-cargo test
-cargo run -- -v hello world   # with verbosity
+cargo run -- extract ManualTest --output /tmp/out  # manual hierarchy test
+cargo run -- read ManualTest/TestFunctions.java | head
 ```
 
-## Release build
-
-```bash
-cargo build --release
-./target/release/reko --help
+Project layout:
+```
+src/main.rs                         # CLI (clap) + dir vs file dispatch
+src/reader.rs                       # exact read + line-number format
+src/ir.rs                           # IrFunction mirrors supportive/IR_function.json
+src/orchestrator.rs                 # reader → ExtractionFactory
+src/scan.rs                         # Walker (ignore+rayon) + JSONL
+src/ExtractionFactory/{java,python,c,cpp,php,js,jsx,csharp,ts,tsx,go,rust,swift,ruby,kotlin}Extractor.rs
+supportive/IR_function.json         # IR spec
 ```
 
-### Cross-compilation
+CI: `.github/workflows/ci.yml` builds `ubuntu/windows/macos` + release artifacts on `v*` tags.
 
-Install targets:
+---
 
-```bash
-rustup target add x86_64-pc-windows-gnu x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin
-cargo build --release --target x86_64-unknown-linux-gnu
-```
-
-Or use CI (`.github/workflows/ci.yml`) which builds on ubuntu/windows/macos runners and publishes artifacts on tags `v*`.
-
-## Project layout
-
-```
-src/main.rs  # CLI entry (clap derive)
-Cargo.toml   # package + release profile (LTO, stripped)
-```
+## License
+MIT OR Apache-2.0

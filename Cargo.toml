@@ -2,12 +2,16 @@
 name = "reko"
 version = "0.1.0"
 edition = "2021"
-description = "Cross-platform CLI application for Windows, Linux and macOS"
+description = "Cross-platform polyglot code extractor: 15 languages → exact IR JSONL (reader → ExtractionFactory)"
 license = "MIT OR Apache-2.0"
-authors = []
-repository = ""
-keywords = []
-categories = []
+authors = ["sakhadib"]
+repository = "https://github.com/sakhadib/Reko"
+readme = "README.md"
+keywords = ["cli", "parser", "polyglot", "ast", "code-analysis"]
+categories = ["command-line-utilities", "development-tools::build-utils"]
+homepage = "https://github.com/sakhadib/Reko"
+documentation = "https://github.com/sakhadib/Reko"
+exclude = ["ManualTest/*", "supportive/*", "target/*", "reko.jsonl"]
 
 [[bin]]
 name = "reko"
