@@ -1,0 +1,27 @@
+[package]
+name = "reko"
+version = "0.1.0"
+edition = "2021"
+description = "Cross-platform CLI application for Windows, Linux and macOS"
+license = "MIT OR Apache-2.0"
+authors = []
+repository = ""
+keywords = []
+categories = []
+
+[[bin]]
+name = "reko"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+anyhow = "1.0"
+clap-verbosity-flag = "3.0"
+
+[dev-dependencies]
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+opt-level = 3
