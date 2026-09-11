@@ -38,6 +38,12 @@ cargo install reko
 ### From GitHub Releases (binaries)
 Releases publish `reko-linux-x86_64`, `reko-windows-x86_64.exe`, `reko-macos-{x86_64,aarch64}` on tag `v*`. Download from **Releases** and add to `PATH`.
 
+### Model (auto, global)
+`reko index` needs `embeddinggemma-300m-ONNX` (q4, 768d, ~200M). No manual setup:
+- First `reko index` auto-downloads to global cache `~/.cache/reko/model` (or `~/.reko/model`) via `hf` / `hf-hub` — one-time, reused for **any repo** you index.
+- Override with `reko index --model /path/to/model` or `REKO_MODEL=/path`.
+- `reko extract` needs no model.
+
 ### Cross-compilation
 ```bash
 rustup target add x86_64-unknown-linux-gnu x86_64-pc-windows-msvc aarch64-apple-darwin
@@ -51,22 +57,29 @@ cargo build --release --target x86_64-unknown-linux-gnu
 ### Extract a repository (hierarchical JSONL)
 ```bash
 # In any repo, from its root:
-reko extract .                          # → ./reko.jsonl (15 files, 61 funcs etc)
+reko extract .                          # → ./.reko/reko.jsonl (15 files, 61 funcs)
 
 # From anywhere, pointing at a repo:
-reko extract --path /path/to/repo       # → /path/to/repo/reko.jsonl
+reko extract --path /path/to/repo       # → /path/to/repo/.reko/reko.jsonl
 
-# Custom output:
-reko extract . --output /tmp/out        # → /tmp/out/reko.jsonl (folder)
+# Custom output (still respects .gitignore + package ignores):
+reko extract . --output /tmp/out        # → /tmp/out/reko.jsonl
 reko extract . --output /tmp/result.jsonl  # → file
-reko extract ManualTest --output reko.jsonl
 ```
 
-**What you get (`reko.jsonl`):** JSON Lines, one line per file with functions:
+**What you get (`.reko/reko.jsonl`):** JSON Lines, one line per file:
 ```json
 {"file":"src/foo.py","language":"python","count":2,"absolute":"/abs/src/foo.py","functions":[{"ir_version":"1.0","identity":{"id":"foo::MyClass::bar","name":"bar","qualified_name":"foo::MyClass::bar","kind":"function","language":"python",...},"source":{"file":"src/foo.py","module":"foo","source_text":"def bar...","hash":"sha256:...","location":{"start":{"line":3,"column":5,"byte":42},"end":{"line":5,"column":12,"byte":110}}},...}]}
 ```
-Folders are implicit via `file` path (sorted `a/file.py` before `b/file.py`). Unsupported files are **skipped and reported** (`unsupported file(s) skipped, breakdown: json:2 md:3`).
+Folders are implicit via `file` path (sorted). Unsupported files are **skipped and reported**.
+
+### Index with vectors (global model, one-time download)
+```bash
+reko index .                            # uses .reko/reko.jsonl else auto-extracts → .reko/reko.db (sqlite-vec 768d)
+reko index --path /path/to/repo         # from anywhere, same global model ~/.cache/reko/model
+reko index --model ./model --force      # override model, force re-index
+# Model auto-downloaded on first index to ~/.cache/reko/model (embeddinggemma-300m q4, ~200M)
+```
 
 ### Extract a single file
 ```bash
@@ -126,13 +139,17 @@ cargo run -- read ManualTest/TestFunctions.java | head
 
 Project layout:
 ```
-src/main.rs                         # CLI (clap) + dir vs file dispatch
-src/reader.rs                       # exact read + line-number format
-src/ir.rs                           # IrFunction mirrors supportive/IR_function.json
+src/main.rs                         # CLI (+ extract / index)
+src/reader.rs                       # exact read
+src/ir.rs                           # IR spec mirror
 src/orchestrator.rs                 # reader → ExtractionFactory
-src/scan.rs                         # Walker (ignore+rayon) + JSONL
+src/scan.rs                         # walker (ignore+rayon) → .reko/reko.jsonl
+src/model.rs                        # global model resolver + hf auto-download → ~/.cache/reko/model
+src/embed.rs                        # EmbeddingGemma ONNX (q4, 768d, prefix + L2)
+src/index.rs                        # .reko/reko.db sqlite-vec (vec0)
 src/ExtractionFactory/{java,python,c,cpp,php,js,jsx,csharp,ts,tsx,go,rust,swift,ruby,kotlin}Extractor.rs
 supportive/IR_function.json         # IR spec
+model/                              # gitignored, dev cache; prod uses ~/.cache/reko/model
 ```
 
 CI: `.github/workflows/ci.yml` builds `ubuntu/windows/macos` + release artifacts on `v*` tags.

@@ -18,3 +18,5 @@ supportive/
 ManualTest/
 reko.jsonl
 reko.json
+.reko/
+model/

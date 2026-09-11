@@ -411,35 +411,34 @@ fn extract_files_parallel_with_progress(
 }
 
 /// Resolve output path:
-/// - if `output` is None => <root>/reko.jsonl
-/// - if `output` exists as dir => <output>/reko.jsonl
+/// - if `output` is None => <root>/.reko/reko.jsonl  (per new spec)
+/// - if `output` exists as dir => <output>/reko.jsonl  (or <output>/.reko/reko.jsonl if root-like? keep simple)
 /// - if `output` has no extension and not existing but parent exists and name has no dot => treat as dir
 /// - otherwise treat as file.
+/// For backward compat, if output is None we now use .reko subfolder.
 pub fn resolve_output_path(root: &Path, output: Option<&Path>) -> PathBuf {
     match output {
-        None => root.join("reko.jsonl"),
+        None => root.join(".reko").join("reko.jsonl"),
         Some(p) => {
             // If p exists and is dir
             if p.exists() && p.is_dir() {
+                // If p already ends with .reko, just join reko.jsonl else check if we should nest .reko?
+                // Keep simple: <dir>/reko.jsonl . For dir-mode callers that pass root, they already handled None case.
                 return p.join("reko.jsonl");
             }
-            // If p ends with / or has no file extension and looks like dir intent
-            // Heuristic: if extension is empty and path does not contain '.' in file name, and parent exists
             let has_ext = p.extension().is_some();
             if !has_ext {
-                // If parent is existing dir, or p ends with separator, treat as dir
-                // Also if user explicitly passed folder path like "out/" or "results"
-                // We'll treat extension-less as dir if not ending with .jsonl/.json
-                // Simpler: if p is like "output" (no dot) and not existing, still consider dir if last component has no dot
-                // But to avoid ambiguity, if user passes "my.jsonl" it has ext, handled above.
-                // So no ext => dir
                 return p.join("reko.jsonl");
             }
-            // Has extension => file
-            // If parent doesn't exist, we will create it later
             p.to_path_buf()
         }
     }
+}
+
+/// Legacy helper for tests that expect root/reko.jsonl – keep but not used.
+/// Returns .reko path for dir-mode.
+pub fn resolve_output_path_legacy(root: &Path, output: Option<&Path>) -> PathBuf {
+    resolve_output_path(root, output)
 }
 
 /// Write JSONL: one line per FileRecord (folders->files->methods hierarchy)
@@ -504,7 +503,10 @@ mod tests {
     #[test]
     fn resolve_output_file_vs_dir() {
         let root = Path::new("/tmp/repo");
-        assert_eq!(resolve_output_path(root, None), Path::new("/tmp/repo/reko.jsonl"));
+        assert_eq!(
+            resolve_output_path(root, None),
+            Path::new("/tmp/repo/.reko/reko.jsonl")
+        );
         assert_eq!(
             resolve_output_path(root, Some(Path::new("/tmp/out"))),
             Path::new("/tmp/out/reko.jsonl")

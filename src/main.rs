@@ -7,6 +7,9 @@ mod ir;
 mod orchestrator;
 mod reader;
 mod scan;
+mod embed;
+mod index;
+mod model;
 #[allow(non_snake_case)]
 mod ExtractionFactory;
 
@@ -58,13 +61,31 @@ enum Commands {
         #[arg(long = "path", hide = true)]
         path_alias: Option<PathBuf>,
 
-        /// Output file or folder (default: <root>/reko.jsonl for dirs, stdout for single file). If folder, writes reko.jsonl inside it.
+        /// Output file or folder (default: <root>/.reko/reko.jsonl for dirs, stdout for single file). If folder, writes reko.jsonl inside it.
         #[arg(short, long)]
         output: Option<PathBuf>,
 
         /// Compact JSON (single line per function/file; default pretty for single-file, JSONL for dirs)
         #[arg(long)]
         compact: bool,
+    },
+    /// Index .reko/reko.jsonl into .reko/reko.db with sqlite-vec + EmbeddingGemma
+    /// Checks if .reko/reko.jsonl exists, else runs extract pipeline first.
+    Index {
+        /// Path to repository root (default "."). Also supports --path alias.
+        #[arg(default_value = ".", value_name = "PATH")]
+        path: PathBuf,
+
+        #[arg(long = "path", hide = true)]
+        path_alias: Option<PathBuf>,
+
+        /// Model directory (default: auto-resolve ./model then ~/.cache/reko/model with auto-download)
+        #[arg(long)]
+        model: Option<PathBuf>,
+
+        /// Force re-index even if DB exists
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -195,6 +216,41 @@ fn main() -> anyhow::Result<()> {
                 }
             } else {
                 anyhow::bail!("path does not exist: {}", target.display());
+            }
+        }
+        Some(Commands::Index {
+            path,
+            path_alias,
+            model,
+            force,
+        }) => {
+            let target = path_alias.as_ref().unwrap_or(&path).clone();
+            let target = if target.as_os_str().is_empty() {
+                PathBuf::from(".")
+            } else {
+                target
+            };
+            let root = if target.is_file() {
+                target.parent().unwrap_or_else(|| Path::new(".")).to_path_buf()
+            } else {
+                target.clone()
+            };
+            let root = root.canonicalize().unwrap_or(root);
+            let db_path = root.join(".reko").join("reko.db");
+            if db_path.exists() && !force {
+                eprintln!("Found existing DB at {} (use --force to re-index)", db_path.display());
+                // Quick check count
+                if let Ok(conn) = index::open_db(&db_path) {
+                    let cnt: i64 = conn
+                        .query_row("SELECT COUNT(*) FROM vec_index", [], |r| r.get(0))
+                        .unwrap_or(0);
+                    eprintln!(" vec_index contains {cnt} vectors");
+                }
+            } else {
+                let model_display = model.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "auto (global ~/.cache/reko/model)".to_string());
+                eprintln!("Indexing {} → {} (model: {})", root.display(), db_path.display(), model_display);
+                let out = index::index_directory_with_model(&root, model.as_deref())?;
+                eprintln!("Indexed → {}", out.display());
             }
         }
         None => {
