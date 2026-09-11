@@ -10,6 +10,7 @@ mod scan;
 mod embed;
 mod index;
 mod model;
+mod search;
 #[allow(non_snake_case)]
 mod ExtractionFactory;
 
@@ -86,6 +87,23 @@ enum Commands {
         /// Force re-index even if DB exists
         #[arg(long)]
         force: bool,
+    },
+    /// Semantic find over indexed code (sqlite-vec + EmbeddingGemma)
+    Find {
+        /// Query text (natural language or code)
+        query: String,
+
+        /// Show top N results (default 5)
+        #[arg(long, short = 'n', default_value = "5")]
+        top: usize,
+
+        /// Repository path (default ".")
+        #[arg(long, short, default_value = ".")]
+        path: PathBuf,
+
+        /// Model directory (default auto)
+        #[arg(long)]
+        model: Option<PathBuf>,
     },
 }
 
@@ -252,6 +270,15 @@ fn main() -> anyhow::Result<()> {
                 let out = index::index_directory_with_model(&root, model.as_deref())?;
                 eprintln!("Indexed → {}", out.display());
             }
+        }
+        Some(Commands::Find {
+            query,
+            top,
+            path,
+            model,
+        }) => {
+            let root = path.canonicalize().unwrap_or(path);
+            search::search_and_print(&root, &query, top, model.as_deref())?;
         }
         None => {
             println!("Hello, world! Try `reko hello --help` or `reko --help`");

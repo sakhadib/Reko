@@ -81,6 +81,22 @@ reko index --model ./model --force      # override model, force re-index
 # Model auto-downloaded on first index to ~/.cache/reko/model (embeddinggemma-300m q4, ~200M)
 ```
 
+### Semantic find (top 5 formatted)
+```bash
+reko find "add two numbers"                     # → top 5 in CWD, shows file, qualified_name, lines, distance + bar
+reko find "sort array" --top 10                 # top 10
+reko find "reverse string" --top 3 --path /repo # from anywhere, uses repo's .reko/reko.db
+reko find "factorial" --path ManualTest         # semantic over code chunks (task: code retrieval)
+```
+Output:
+```
+  ▸ REKO FIND  "add two numbers"  — top 3 in /repo
+  1. com.example.test::TestFunctions::add (java)  █████ ... 0.540
+     sample.kt  add  sample.kt:4–4  distance 0.4544
+     ───────────────────────────────────────
+  2. ns::Foo::add (cpp)  ...  sample.cpp:5–5
+```
+
 ### Extract a single file
 ```bash
 reko extract path/to/File.java               # → pretty JSON to stdout
