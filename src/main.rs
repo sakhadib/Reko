@@ -11,6 +11,7 @@ mod embed;
 mod index;
 mod model;
 mod search;
+mod update;
 #[allow(non_snake_case)]
 mod ExtractionFactory;
 
@@ -100,6 +101,19 @@ enum Commands {
         /// Repository path (default ".")
         #[arg(long, short, default_value = ".")]
         path: PathBuf,
+
+        /// Model directory (default auto)
+        #[arg(long)]
+        model: Option<PathBuf>,
+    },
+    /// Update .reko/reko.jsonl and .reko/reko.db incrementally (copy old, re-extract, diff by hash, re-embed modified)
+    Update {
+        /// Repository path (default ".")
+        #[arg(default_value = ".", value_name = "PATH")]
+        path: PathBuf,
+
+        #[arg(long = "path", hide = true)]
+        path_alias: Option<PathBuf>,
 
         /// Model directory (default auto)
         #[arg(long)]
@@ -279,6 +293,15 @@ fn main() -> anyhow::Result<()> {
         }) => {
             let root = path.canonicalize().unwrap_or(path);
             search::search_and_print(&root, &query, top, model.as_deref())?;
+        }
+        Some(Commands::Update {
+            path,
+            path_alias,
+            model,
+        }) => {
+            let target = path_alias.as_ref().unwrap_or(&path).clone();
+            let root = target.canonicalize().unwrap_or(target);
+            update::update_directory(&root, model.as_deref())?;
         }
         None => {
             println!("Hello, world! Try `reko hello --help` or `reko --help`");

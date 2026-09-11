@@ -81,7 +81,7 @@ pub struct Signature {
     pub effects: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Parameter {
     pub name: String,
     #[serde(rename = "type")]
